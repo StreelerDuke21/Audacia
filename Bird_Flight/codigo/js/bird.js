@@ -26,7 +26,7 @@ class Bird3D {
     const bodyGeo = new THREE.SphereGeometry(0.42, 10, 8);
     bodyGeo.scale(0.9, 0.78, 1.7);
     this.body = new THREE.Mesh(bodyGeo, bodyMat);
-    this.model.add(this.body);
+        this.model.add(this.body);
 
     // Pecho
     const bellyGeo = new THREE.SphereGeometry(0.34, 8, 6);
@@ -40,7 +40,7 @@ class Bird3D {
     headGeo.scale(0.95, 0.9, 1.1);
     this.head = new THREE.Mesh(headGeo, headMat);
     this.head.position.set(0, 0.14, 0.78);
-    this.model.add(this.head);
+        this.model.add(this.head);
 
     // Máscara oscura
     const maskGeo = new THREE.SphereGeometry(0.24, 6, 5);
@@ -141,6 +141,7 @@ class Bird3D {
     this.wasAscending = false;
     this.preparingTakeoff = false;
     this.turnIntensity = 0;
+    // Targets de animación de alas (lerp suave)
     this._wingTX = 0;
     this._wingTZ = 0.2;
     this._wingTY = 0;
@@ -154,117 +155,214 @@ class Bird3D {
     this._wingTY = y;
   }
 
-  _applyWingLerp(speed = 0.15) {
-    this.leftWing.rotation.x = THREE.MathUtils.lerp(this.leftWing.rotation.x, this._wingTX, speed);
-    this.rightWing.rotation.x = THREE.MathUtils.lerp(this.rightWing.rotation.x, -this._wingTX, speed);
-    this.leftWing.rotation.z = THREE.MathUtils.lerp(this.leftWing.rotation.z, this._wingTZ, speed);
-    this.rightWing.rotation.z = THREE.MathUtils.lerp(this.rightWing.rotation.z, -this._wingTZ, speed);
-    this.leftWing.rotation.y = THREE.MathUtils.lerp(this.leftWing.rotation.y, this._wingTY, speed);
-    this.rightWing.rotation.y = THREE.MathUtils.lerp(this.rightWing.rotation.y, -this._wingTY, speed);
+  _applyWingLerp(t = 0.18) {
+    // left wing
+    this.leftWing.rotation.x = THREE.MathUtils.lerp(this.leftWing.rotation.x, this._wingTX, t);
+    this.leftWing.rotation.z = THREE.MathUtils.lerp(this.leftWing.rotation.z, this._wingTZ, t);
+    this.leftWing.rotation.y = THREE.MathUtils.lerp(this.leftWing.rotation.y, this._wingTY, t);
+    // right (espejo en z/y)
+    this.rightWing.rotation.x = THREE.MathUtils.lerp(this.rightWing.rotation.x, this._wingTX, t);
+    this.rightWing.rotation.z = THREE.MathUtils.lerp(this.rightWing.rotation.z, -this._wingTZ, t);
+    this.rightWing.rotation.y = THREE.MathUtils.lerp(this.rightWing.rotation.y, -this._wingTY, t);
   }
 
-  checkCollisions(trees, mountains) {
-    const px = this.position.x;
-    const pz = this.position.z;
-    const py = this.position.y;
-    const grounded = this.state === 'GROUNDED' || this.onGround;
+  checkCollisions(trees, hills, mountains) {
+    const radius = this.onGround || this.state === 'GROUNDED'
+      ? CONFIG.treeCollisionRadiusGround
+      : CONFIG.treeCollisionRadius;
 
-    for (const t of trees) {
-      const dx = px - t.x;
-      const dz = pz - t.z;
-      const dist = Math.hypot(dx, dz);
-      const r = grounded ? CONFIG.treeCollisionRadiusGround : CONFIG.treeCollisionRadius;
-      if (dist < r && py < t.height) {
-        const push = (r - dist) * CONFIG.collisionPushBack;
-        const nx = dx / (dist || 1);
-        const nz = dz / (dist || 1);
-        this.position.x += nx * push;
-        this.position.z += nz * push;
-        this.velocity.x *= 0.2;
-        this.velocity.z *= 0.2;
-        if (!grounded) {
-          this.velocity.y = Math.min(this.velocity.y, 0);
+    if (trees && trees.length) {
+      for (const tree of trees) {
+        const dx = this.position.x - tree.x;
+        const dz = this.position.z - tree.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        const minDist = radius + (tree.radius || 1.2);
+
+        if (dist < minDist && this.position.y < tree.height + 1.5) {
+          const nx = dx / (dist || 0.001);
+          const nz = dz / (dist || 0.001);
+          this.position.x += nx * CONFIG.collisionPushBack;
+          this.position.z += nz * CONFIG.collisionPushBack;
+          this.velocity.x = nx * 0.08;
+          this.velocity.z = nz * 0.08;
+          if (this.velocity.y < 0.05) this.velocity.y = 0.06;
         }
       }
     }
 
-    for (const m of mountains) {
-      const dx = px - m.x;
-      const dz = pz - m.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist < m.radius && py < m.height) {
-        const push = (m.radius - dist) * 0.8;
-        const nx = dx / (dist || 1);
-        const nz = dz / (dist || 1);
-        this.position.x += nx * push;
-        this.position.z += nz * push;
-        this.velocity.x *= 0.3;
-        this.velocity.z *= 0.3;
+    if (hills && hills.length) {
+      for (const hill of hills) {
+        const dx = this.position.x - hill.x;
+        const dz = this.position.z - hill.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist >= hill.radius) continue;
+        const t = dist / hill.radius;
+        const surfaceY = hill.height * Math.sqrt(Math.max(0, 1 - t * t));
+        if (this.position.y < surfaceY + 0.9) {
+          if (dist < 0.15) {
+            this.position.y = Math.max(this.position.y, surfaceY + 1.0);
+          } else {
+            const nx = dx / dist;
+            const nz = dz / dist;
+            this.position.y = Math.max(this.position.y, surfaceY + 0.85);
+            if (this.position.y < surfaceY + 1.2) {
+              this.position.x += nx * 0.15;
+              this.position.z += nz * 0.15;
+            }
+          }
+          if (this.velocity.y < 0) this.velocity.y *= -0.25;
+          if (this.position.y < surfaceY + 1.5) {
+            this.velocity.x *= 0.7;
+            this.velocity.z *= 0.7;
+          }
+        }
+      }
+    }
+
+    if (mountains && mountains.length) {
+      for (const mtn of mountains) {
+        const dx = this.position.x - mtn.x;
+        const dz = this.position.z - mtn.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist >= mtn.radius) continue;
+        const t = dist / mtn.radius;
+        const surfaceY = mtn.height * Math.max(0, 1 - t);
+        if (this.position.y < surfaceY + 1.2) {
+          if (dist < 0.2) {
+            this.position.y = Math.max(this.position.y, surfaceY + 1.2);
+          } else {
+            const nx = dx / dist;
+            const nz = dz / dist;
+            this.position.y = Math.max(this.position.y, surfaceY + 1.0);
+            this.position.x += nx * 0.25;
+            this.position.z += nz * 0.25;
+          }
+          if (this.velocity.y < 0) this.velocity.y *= -0.2;
+          this.velocity.x *= 0.65;
+          this.velocity.z *= 0.65;
+        }
       }
     }
   }
 
   update(action, leanFactor = 0, flapIntensity = 0.5) {
     this.action = action;
-    const dt = 1;
+    const minF = CONFIG.turnSpeedMinFactor != null ? CONFIG.turnSpeedMinFactor : 0.35;
+    const absLean = Math.min(1, Math.abs(leanFactor || 0));
+    this.turnIntensity = absLean > 0 ? (minF + (1 - minF) * absLean) : 0;
+    this.wingFlapPhase += 0.32;
+    this.walkPhase += 0.18;
+    const flap = Math.sin(this.wingFlapPhase);
 
+    const nearGround = this.position.y <= CONFIG.groundY + 0.15;
     if (this.flapCooldown > 0) this.flapCooldown--;
 
-    const grounded = this.state === 'GROUNDED' || this.onGround;
-
-    if (grounded) {
-      this.velocity.y = 0;
+    if (nearGround && this.velocity.y <= 0.02 && this.state !== 'TAKEOFF') {
+      this.onGround = true;
       this.position.y = CONFIG.groundY;
+      this.velocity.y = 0;
+      this.state = 'GROUNDED';
 
-      if (action === 'ASCEND' && this.flapCooldown <= 0) {
+      if (action === 'ASCEND' && !this.wasAscending && this.flapCooldown <= 0) {
         this.flapCount++;
         this.flapCooldown = CONFIG.flapCooldownFrames;
         this.preparingTakeoff = true;
       }
+      this.wasAscending = (action === 'ASCEND');
 
       if (this.flapCount >= CONFIG.flapsNeededToTakeoff) {
         this.state = 'TAKEOFF';
         this.takeoffTimer = CONFIG.takeoffDuration;
         this.velocity.y = CONFIG.takeoffForce;
+        this.onGround = false;
         this.flapCount = 0;
         this.preparingTakeoff = false;
-        this.onGround = false;
       }
-
-      // Caminar
-      const walk = action === 'GLIDE' || action === 'TURN_L' || action === 'TURN_R';
-      if (walk) {
-        const speed = CONFIG.walkSpeed;
-        this.velocity.x = Math.sin(this.yaw) * speed;
-        this.velocity.z = Math.cos(this.yaw) * speed;
-        this.walkPhase += 0.15;
-      } else {
-        this.velocity.x *= 0.9;
-        this.velocity.z *= 0.9;
-        this.walkPhase = 0;
-      }
-
-      // Giro en suelo
-      if (action === 'TURN_L') this.yaw += CONFIG.turnSpeed * 0.6;
-      if (action === 'TURN_R') this.yaw -= CONFIG.turnSpeed * 0.6;
-
-      // Animación de aleteo al intentar despegar
-      if (this.preparingTakeoff || this.flapCount > 0 || action === 'ASCEND') {
-        this.wingFlapPhase += 0.35;
-        const flap = Math.sin(this.wingFlapPhase);
-        this._setWingTargets(-0.5 + flap * 0.4, 0.3 + flap * 0.3, 0);
-        this._applyWingLerp(0.3);
-      } else {
-        // Alas recogidas en suelo
-        this._setWingTargets(0.1, 0.05, 0);
-        this._applyWingLerp(0.1);
-      }
-
+    } else if (!nearGround) {
+      this.onGround = false;
+      this.flapCount = 0;
+      this.preparingTakeoff = false;
+      if (this.state !== 'TAKEOFF') this.state = 'FLYING';
     } else {
-      // En vuelo
-      if (this.state === 'TAKEOFF') {
-        this.takeoffTimer--;
-        if (this.takeoffTimer <= 0) this.state = 'FLYING';
+      this.wasAscending = (action === 'ASCEND');
+    }
+
+    if (this.state === 'TAKEOFF') {
+      this.takeoffTimer--;
+      this.leftWing.scale.set(1, 1, 1);
+      this.rightWing.scale.set(1, 1, 1);
+      this._setWingTargets(-0.35 + flap * 0.4, 0.7 + flap * 0.25, 0);
+      this._applyWingLerp(0.25);
+      this.velocity.y += CONFIG.ascendForce * 0.22;
+      if (this.takeoffTimer <= 0) this.state = 'FLYING';
+    }
+    else if (this.state === 'GROUNDED') {
+      const tryingTakeoff = (action === 'ASCEND') || this.preparingTakeoff || this.flapCount > 0;
+
+      if (tryingTakeoff) {
+        this.leftWing.scale.set(
+          THREE.MathUtils.lerp(this.leftWing.scale.x, 1, 0.2), 1,
+          THREE.MathUtils.lerp(this.leftWing.scale.z, 1, 0.2)
+        );
+        this.rightWing.scale.set(
+          THREE.MathUtils.lerp(this.rightWing.scale.x, 1, 0.2), 1,
+          THREE.MathUtils.lerp(this.rightWing.scale.z, 1, 0.2)
+        );
+        this._setWingTargets(-0.25 + flap * 0.4, 0.55 + flap * 0.35, 0.05);
+        this._applyWingLerp(0.22);
+      } else {
+        this.leftWing.scale.set(
+          THREE.MathUtils.lerp(this.leftWing.scale.x, 0.28, 0.2), 1,
+          THREE.MathUtils.lerp(this.leftWing.scale.z, 0.55, 0.2)
+        );
+        this.rightWing.scale.set(
+          THREE.MathUtils.lerp(this.rightWing.scale.x, 0.28, 0.2), 1,
+          THREE.MathUtils.lerp(this.rightWing.scale.z, 0.55, 0.2)
+        );
+        this._setWingTargets(0.2, 0.12, 0.3);
+        this._applyWingLerp(0.18);
+      }
+
+      const walking = action === 'GLIDE' || action === 'TURN_L' || action === 'TURN_R' ||
+                      (action === 'ASCEND' && this.flapCount < CONFIG.flapsNeededToTakeoff);
+      if (walking) {
+        const forward = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+        this.velocity.x = forward.x * CONFIG.walkSpeed;
+        this.velocity.z = forward.z * CONFIG.walkSpeed;
+        this.leftLeg.rotation.x  = 0.3 + Math.sin(this.walkPhase) * 0.45;
+        this.rightLeg.rotation.x = 0.3 + Math.sin(this.walkPhase + Math.PI) * 0.45;
+        this.model.rotation.z = Math.sin(this.walkPhase) * 0.06;
+        this.model.position.y = Math.abs(Math.sin(this.walkPhase)) * 0.04;
+      } else {
+        this.velocity.x *= 0.85;
+        this.velocity.z *= 0.85;
+        this.leftLeg.rotation.x  = THREE.MathUtils.lerp(this.leftLeg.rotation.x, 0.35, 0.15);
+        this.rightLeg.rotation.x = THREE.MathUtils.lerp(this.rightLeg.rotation.x, 0.35, 0.15);
+        this.model.rotation.z = THREE.MathUtils.lerp(this.model.rotation.z, 0, 0.1);
+        this.model.position.y = THREE.MathUtils.lerp(this.model.position.y, 0, 0.1);
+      }
+
+      if (action === 'TURN_L') this.yaw += CONFIG.turnSpeed * 0.7 * (this.turnIntensity || 1);
+      if (action === 'TURN_R') this.yaw -= CONFIG.turnSpeed * 0.7 * (this.turnIntensity || 1);
+    }
+    else {
+      this.leftLeg.rotation.x  = 0.5;
+      this.rightLeg.rotation.x = 0.5;
+      this.model.position.y = 0;
+      this.model.rotation.z = 0;
+
+      this.leftWing.scale.set(
+        THREE.MathUtils.lerp(this.leftWing.scale.x, 1, 0.25), 1,
+        THREE.MathUtils.lerp(this.leftWing.scale.z, 1, 0.25)
+      );
+      this.rightWing.scale.set(
+        THREE.MathUtils.lerp(this.rightWing.scale.x, 1, 0.25), 1,
+        THREE.MathUtils.lerp(this.rightWing.scale.z, 1, 0.25)
+      );
+      // Restaurar anclaje de alas (salen de la picada)
+      if (action !== 'DIVE') {
+        this.leftWing.position.x = THREE.MathUtils.lerp(this.leftWing.position.x, 0.2, 0.15);
+        this.rightWing.position.x = THREE.MathUtils.lerp(this.rightWing.position.x, -0.2, 0.15);
       }
 
       if (action === 'ASCEND') {
@@ -277,85 +375,133 @@ class Bird3D {
         const maxClimb = (CONFIG.ascendMaxClimbMin != null ? CONFIG.ascendMaxClimbMin : 0.05)
           + (CONFIG.ascendMaxClimbRange != null ? CONFIG.ascendMaxClimbRange : 0.20) * curve;
         if (this.velocity.y > maxClimb) this.velocity.y = maxClimb;
-
-        this.wingFlapPhase += 0.4;
-        const flap = Math.sin(this.wingFlapPhase);
         this._setWingTargets(-0.4 + flap * 0.2, 0.65 + flap * 0.4, 0);
         this._applyWingLerp(0.22);
       } else if (action === 'DIVE') {
         this.velocity.y -= CONFIG.diveForce;
-        this._setWingTargets(0.6, 0.1, 0);
+        // Maniobra leve en picada según inclinación del cuerpo
+        const diveTurn = (this.turnIntensity || 0) * CONFIG.turnSpeed * 0.35;
+        if (leanFactor > 0.05) this.yaw += diveTurn;
+        else if (leanFactor < -0.05) this.yaw -= diveTurn;
+
+        // Picada de halcón: alas muy plegadas y pegadas al cuerpo
+        this.leftWing.scale.set(
+          THREE.MathUtils.lerp(this.leftWing.scale.x, 0.18, 0.22), 1,
+          THREE.MathUtils.lerp(this.leftWing.scale.z, 0.4, 0.22)
+        );
+        this.rightWing.scale.set(
+          THREE.MathUtils.lerp(this.rightWing.scale.x, 0.18, 0.22), 1,
+          THREE.MathUtils.lerp(this.rightWing.scale.z, 0.4, 0.22)
+        );
+        this.leftWing.rotation.x = THREE.MathUtils.lerp(this.leftWing.rotation.x, 0.85, 0.2);
+        this.rightWing.rotation.x = THREE.MathUtils.lerp(this.rightWing.rotation.x, 0.85, 0.2);
+        this.leftWing.rotation.y = THREE.MathUtils.lerp(this.leftWing.rotation.y, 0.55, 0.2);
+        this.rightWing.rotation.y = THREE.MathUtils.lerp(this.rightWing.rotation.y, -0.55, 0.2);
+        this.leftWing.rotation.z = THREE.MathUtils.lerp(this.leftWing.rotation.z, 0.05, 0.2);
+        this.rightWing.rotation.z = THREE.MathUtils.lerp(this.rightWing.rotation.z, -0.05, 0.2);
+        this.leftWing.position.x = THREE.MathUtils.lerp(this.leftWing.position.x, 0.12, 0.15);
+        this.rightWing.position.x = THREE.MathUtils.lerp(this.rightWing.position.x, -0.12, 0.15);
+      } else if (action === 'GLIDE') {
+        this.velocity.y *= 0.94;
+        this._setWingTargets(0.02 + flap * 0.03, 0.22 + flap * 0.03, 0);
         this._applyWingLerp(0.15);
-        // Inclinación hacia adelante en picada
-        this.group.rotation.x = THREE.MathUtils.lerp(this.group.rotation.x, -0.4, 0.1);
+      } else if (action === 'TURN_L') {
+        const ti = this.turnIntensity || 1;
+        this.yaw += CONFIG.turnSpeed * ti;
+        this.velocity.y *= 0.94;
+        // animación invertida (cámara espejada), proporcional
+        this.leftWing.rotation.x = THREE.MathUtils.lerp(this.leftWing.rotation.x, 0.05, 0.15);
+        this.rightWing.rotation.x = THREE.MathUtils.lerp(this.rightWing.rotation.x, 0.05, 0.15);
+        this.leftWing.rotation.y = THREE.MathUtils.lerp(this.leftWing.rotation.y, 0, 0.15);
+        this.rightWing.rotation.y = THREE.MathUtils.lerp(this.rightWing.rotation.y, 0, 0.15);
+        this.leftWing.rotation.z = THREE.MathUtils.lerp(this.leftWing.rotation.z, 0.05 * ti, 0.15);
+        this.rightWing.rotation.z = THREE.MathUtils.lerp(this.rightWing.rotation.z, -0.15 - 0.55 * ti, 0.15);
+      } else if (action === 'TURN_R') {
+        const ti = this.turnIntensity || 1;
+        this.yaw -= CONFIG.turnSpeed * ti;
+        this.velocity.y *= 0.94;
+        this.leftWing.rotation.x = THREE.MathUtils.lerp(this.leftWing.rotation.x, 0.05, 0.15);
+        this.rightWing.rotation.x = THREE.MathUtils.lerp(this.rightWing.rotation.x, 0.05, 0.15);
+        this.leftWing.rotation.y = THREE.MathUtils.lerp(this.leftWing.rotation.y, 0, 0.15);
+        this.rightWing.rotation.y = THREE.MathUtils.lerp(this.rightWing.rotation.y, 0, 0.15);
+        this.leftWing.rotation.z = THREE.MathUtils.lerp(this.leftWing.rotation.z, 0.15 + 0.55 * ti, 0.15);
+        this.rightWing.rotation.z = THREE.MathUtils.lerp(this.rightWing.rotation.z, -0.05 * ti, 0.15);
       } else {
-        // Planear o girar
-        if (action === 'TURN_L') {
-          const intensity = Math.abs(leanFactor);
-          this.yaw += CONFIG.turnSpeed * (0.3 + intensity * 0.7);
-          this._setWingTargets(0.15, 0.5 + intensity * 0.3, 0.2);
-        } else if (action === 'TURN_R') {
-          const intensity = Math.abs(leanFactor);
-          this.yaw -= CONFIG.turnSpeed * (0.3 + intensity * 0.7);
-          this._setWingTargets(0.15, 0.5 + intensity * 0.3, -0.2);
-        } else {
-          this._setWingTargets(0.05, 0.4, 0);
-        }
-        this._applyWingLerp(0.12);
-
-        // Solo en picada cae rápido; el resto desciende lento
-        if (action === 'DIVE') {
-          this.velocity.y -= CONFIG.gravity;
-          if (this.velocity.y < -CONFIG.maxFallSpeed) this.velocity.y = -CONFIG.maxFallSpeed;
-        } else if (action !== 'ASCEND') {
-          this.velocity.y -= CONFIG.gravity * CONFIG.glideGravityFactor;
-          const maxGlideFall = CONFIG.maxFallSpeed * 0.35;
-          if (this.velocity.y < -maxGlideFall) this.velocity.y = -maxGlideFall;
-        }
+        this._setWingTargets(0.15, 0.18 + flap * 0.18, 0);
+        this._applyWingLerp(0.15);
       }
 
-      // Velocidad horizontal
-      const speed = CONFIG.glideSpeed;
-      this.velocity.x = Math.sin(this.yaw) * speed;
-      this.velocity.z = Math.cos(this.yaw) * speed;
-
-      // Maniobra leve en picada
+      // Solo en picada cae rápido; el resto desciende lento
       if (action === 'DIVE') {
-        if (leanFactor > 0.1) this.yaw += CONFIG.turnSpeed * 0.15;
-        if (leanFactor < -0.1) this.yaw -= CONFIG.turnSpeed * 0.15;
+        this.velocity.y -= CONFIG.gravity;
+        if (this.velocity.y < -CONFIG.maxFallSpeed) this.velocity.y = -CONFIG.maxFallSpeed;
+      } else if (action !== 'ASCEND') {
+        this.velocity.y -= CONFIG.gravity * CONFIG.glideGravityFactor;
+        const maxGlideFall = CONFIG.maxFallSpeed * 0.35;
+        if (this.velocity.y < -maxGlideFall) this.velocity.y = -maxGlideFall;
       }
 
-      this.group.rotation.z = THREE.MathUtils.lerp(this.group.rotation.z, -leanFactor * 0.4, 0.1);
-      if (action !== 'DIVE') {
-        this.group.rotation.x = THREE.MathUtils.lerp(this.group.rotation.x, 0, 0.1);
-      }
+      const forward = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+      const targetSpeed = (action === 'GLIDE' || action === 'ASCEND' || action === 'TURN_L' || action === 'TURN_R')
+        ? CONFIG.glideSpeed : CONFIG.glideSpeed * 0.35;
+      this.velocity.x += (forward.x * targetSpeed - this.velocity.x) * 0.09;
+      this.velocity.z += (forward.z * targetSpeed - this.velocity.z) * 0.09;
     }
 
-    // Aplicar velocidad
-    this.position.x += this.velocity.x * dt;
-    this.position.y += this.velocity.y * dt;
-    this.position.z += this.velocity.z * dt;
+    this.tail.rotation.y = Math.sin(this.wingFlapPhase * 0.55) * 0.1;
+    this.tail.rotation.x = (action === 'DIVE') ? 0.35 : Math.sin(this.wingFlapPhase * 0.3) * 0.05;
+    this.tail.scale.z = (action === 'DIVE') ? THREE.MathUtils.lerp(this.tail.scale.z || 1, 0.75, 0.15) : THREE.MathUtils.lerp(this.tail.scale.z || 1, 1, 0.15);
 
-    // Límites del mundo
-    const limit = CONFIG.worldSize * 0.45;
-    this.position.x = Math.max(-limit, Math.min(limit, this.position.x));
-    this.position.z = Math.max(-limit, Math.min(limit, this.position.z));
+    this.velocity.x *= CONFIG.drag;
+    this.velocity.z *= CONFIG.drag;
+    this.position.add(this.velocity);
 
-    // Suelo
-    if (this.position.y <= CONFIG.groundY) {
+    if (this.position.y < CONFIG.groundY) {
       this.position.y = CONFIG.groundY;
-      this.velocity.y = 0;
-      if (this.state !== 'GROUNDED') {
-        this.state = 'GROUNDED';
-        this.onGround = true;
-        this.flapCount = 0;
-        this.preparingTakeoff = false;
-      }
-    } else {
-      this.onGround = false;
+      this.velocity.y = Math.max(0, this.velocity.y);
+    }
+    if (this.position.y > 55) {
+      this.position.y = 55;
+      this.velocity.y = Math.min(0, this.velocity.y);
+    }
+
+    const half = CONFIG.worldSize * 0.48;
+    if (this.position.x > half) {
+      this.position.x = half;
+      this.velocity.x = Math.min(0, this.velocity.x) * -0.2;
+    } else if (this.position.x < -half) {
+      this.position.x = -half;
+      this.velocity.x = Math.max(0, this.velocity.x) * -0.2;
+    }
+    if (this.position.z > half) {
+      this.position.z = half;
+      this.velocity.z = Math.min(0, this.velocity.z) * -0.2;
+    } else if (this.position.z < -half) {
+      this.position.z = -half;
+      this.velocity.z = Math.max(0, this.velocity.z) * -0.2;
     }
 
     this.group.position.copy(this.position);
     this.group.rotation.y = this.yaw;
+
+    if (this.state === 'FLYING' || this.state === 'TAKEOFF') {
+      const ti = this.turnIntensity || 0;
+      if (action === 'TURN_L') {
+        this.group.rotation.z = THREE.MathUtils.lerp(this.group.rotation.z, -0.35 * ti, 0.12);
+      } else if (action === 'TURN_R') {
+        this.group.rotation.z = THREE.MathUtils.lerp(this.group.rotation.z, 0.35 * ti, 0.12);
+      } else if (action === 'DIVE') {
+        this.group.rotation.x = THREE.MathUtils.lerp(this.group.rotation.x, 0.85, 0.14); // inclinación fuerte hacia adelante
+        // Alabeo muy leve al maniobrar en picada
+        const bank = (leanFactor || 0) * 0.12;
+        this.group.rotation.z = THREE.MathUtils.lerp(this.group.rotation.z, bank, 0.1);
+      } else {
+        this.group.rotation.z = THREE.MathUtils.lerp(this.group.rotation.z, 0, 0.08);
+        this.group.rotation.x = THREE.MathUtils.lerp(this.group.rotation.x, 0, 0.08);
+      }
+    } else {
+      this.group.rotation.z = THREE.MathUtils.lerp(this.group.rotation.z, 0, 0.1);
+      this.group.rotation.x = THREE.MathUtils.lerp(this.group.rotation.x, 0, 0.1);
+    }
   }
 }
