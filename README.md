@@ -13,6 +13,7 @@ Cada proyecto está en una carpeta independiente y contiene:
 |----------|--------------|
 | [Bird_Flight](./Bird_Flight/) | Juego web 3D controlado por body tracking (cámara + MoveNet + Three.js). El jugador controla un halcón con gestos. |
 | [Ball_on_Plate](./Ball_on_Plate/) | Control inteligente Ball-on-Plate con Reinforcement Learning (SAC), simulación Gymnasium, visión por computador (OpenCV) y control de servomotores. |
+| [Detector_Proximidad](./Detector_Proximidad/) | Sistema en Raspberry Pi 4 con sensor ultrasónico HC-SR04 que reproduce videos de avatar digital (idle + saludo) al detectar personas. Arranque automático con systemd. |
 
 ## Notas
 
