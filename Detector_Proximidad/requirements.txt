@@ -1,0 +1,5 @@
+# Detector de Proximidad Interactivo - Raspberry Pi
+# Compatible con Raspberry Pi OS (Bookworm / Bullseye)
+
+gpiozero>=2.0.0
+python-vlc>=3.0.0
