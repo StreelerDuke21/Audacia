@@ -1,0 +1,21 @@
+# Bird Flight – Prototipo Web
+# Dependencias (cargadas vía CDN en index.html, no requieren instalación local)
+
+## Navegador
+- Chrome, Firefox o Edge actualizado (con soporte WebGL y getUserMedia)
+- Cámara web USB o integrada
+
+## Librerías (CDN)
+- Three.js 0.160.0
+- TensorFlow.js 4.17.0 (core, converter, backend-webgl)
+- TensorFlow.js Models – Pose Detection 2.1.3 (MoveNet)
+
+## Servidor local
+- Python 3.x (para `python3 -m http.server`)
+  o cualquier servidor HTTP estático
+
+## Hardware mínimo recomendado
+- CPU: 4 núcleos
+- RAM: 4 GB
+- Cámara: 640×480 o superior
+- GPU con soporte WebGL (para MoveNet y Three.js)
